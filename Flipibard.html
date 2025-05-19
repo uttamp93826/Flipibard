@@ -1,0 +1,362 @@
+import pygame
+import random
+import time
+import sys
+from pygame.locals import *
+
+# Initialize pygame
+pygame.init()
+
+# Constants
+WINDOW_WIDTH = 800
+WINDOW_HEIGHT = 700
+GRID_SIZE = 4
+CARD_WIDTH = 100
+CARD_HEIGHT = 100
+MARGIN = 20
+GRID_OFFSET_X = (WINDOW_WIDTH - (GRID_SIZE * (CARD_WIDTH + MARGIN))) // 2
+GRID_OFFSET_Y = 150
+FPS = 60
+WHITE = (255, 255, 255)
+BLUE = (30, 136, 229)
+BLACK = (0, 0, 0)
+GRAY = (200, 200, 200)
+GREEN = (76, 175, 80)
+RED = (255, 0, 0)
+
+# Set up the display
+DISPLAY_SURF = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+pygame.display.set_caption('Memory Card Game')
+CLOCK = pygame.time.Clock()
+
+# Game variables
+cards = []
+revealed = []
+matched_pairs = 0
+moves = 0
+game_over = False
+first_card = None
+second_card = None
+waiting = False
+wait_time = 0
+
+# Ad simulation variables
+ad_visible = False
+ad_timer = 0
+AD_DURATION = 5  # seconds between ads
+LAST_AD_TIME = 0
+
+# Shapes and colors for card fronts
+SHAPES = [
+    ('circle', (255, 0, 0)),    # Red circle
+    ('square', (0, 255, 0)),    # Green square
+    ('triangle', (0, 0, 255)),  # Blue triangle
+    ('diamond', (255, 255, 0)), # Yellow diamond
+    ('star', (255, 0, 255)),    # Purple star
+    ('heart', (255, 100, 100)), # Pink heart
+    ('hexagon', (0, 255, 255)), # Cyan hexagon
+    ('oval', (128, 0, 128))     # Purple oval
+]
+
+# Fonts
+FONT_LARGE = pygame.font.SysFont('Arial', 48)
+FONT_MEDIUM = pygame.font.SysFont('Arial', 36)
+FONT_SMALL = pygame.font.SysFont('Arial', 24)
+
+def initialize_game():
+    global cards, revealed, matched_pairs, moves, game_over, first_card, second_card, waiting, wait_time
+    
+    # Create pairs of cards
+    card_values = []
+    for i in range(len(SHAPES)):
+        card_values.append(i)
+        card_values.append(i)
+    
+    # Shuffle the cards
+    random.shuffle(card_values)
+    
+    # Initialize card grid
+    cards = []
+    revealed = []
+    for row in range(GRID_SIZE):
+        card_row = []
+        reveal_row = []
+        for col in range(GRID_SIZE):
+            if row * GRID_SIZE + col < len(card_values):
+                card_row.append(card_values[row * GRID_SIZE + col])
+            else:
+                card_row.append(-1)  # Empty slot if grid is larger than pairs
+            reveal_row.append(False)
+        cards.append(card_row)
+        revealed.append(reveal_row)
+    
+    # Reset game state
+    matched_pairs = 0
+    moves = 0
+    game_over = False
+    first_card = None
+    second_card = None
+    waiting = False
+    wait_time = 0
+
+def draw_card_back(x, y):
+    pygame.draw.rect(DISPLAY_SURF, BLUE, (x, y, CARD_WIDTH, CARD_HEIGHT))
+    pygame.draw.rect(DISPLAY_SURF, WHITE, (x, y, CARD_WIDTH, CARD_HEIGHT), 3)
+
+def draw_shape(shape_idx, x, y):
+    shape, color = SHAPES[shape_idx]
+    center_x = x + CARD_WIDTH // 2
+    center_y = y + CARD_HEIGHT // 2
+    size = min(CARD_WIDTH, CARD_HEIGHT) // 3
+    
+    if shape == 'circle':
+        pygame.draw.circle(DISPLAY_SURF, color, (center_x, center_y), size)
+    elif shape == 'square':
+        pygame.draw.rect(DISPLAY_SURF, color, (center_x - size, center_y - size, size * 2, size * 2))
+    elif shape == 'triangle':
+        points = [
+            (center_x, center_y - size),
+            (center_x - size, center_y + size),
+            (center_x + size, center_y + size)
+        ]
+        pygame.draw.polygon(DISPLAY_SURF, color, points)
+    elif shape == 'diamond':
+        points = [
+            (center_x, center_y - size),
+            (center_x + size, center_y),
+            (center_x, center_y + size),
+            (center_x - size, center_y)
+        ]
+        pygame.draw.polygon(DISPLAY_SURF, color, points)
+    elif shape == 'star':
+        outer_radius = size
+        inner_radius = size // 2
+        points = []
+        for i in range(5):
+            angle = 2 * 3.14159 * i / 5 - 3.14159 / 2
+            # Outer point
+            points.append((center_x + outer_radius * math.cos(angle), 
+                           center_y + outer_radius * math.sin(angle)))
+            # Inner point
+            angle += 3.14159 / 5
+            points.append((center_x + inner_radius * math.cos(angle), 
+                           center_y + inner_radius * math.sin(angle)))
+        pygame.draw.polygon(DISPLAY_SURF, color, points)
+    elif shape == 'heart':
+        # Simplified heart shape
+        pygame.draw.circle(DISPLAY_SURF, color, (center_x - size//2, center_y - size//2), size//2)
+        pygame.draw.circle(DISPLAY_SURF, color, (center_x + size//2, center_y - size//2), size//2)
+        points = [
+            (center_x - size, center_y - size//2),
+            (center_x, center_y + size),
+            (center_x + size, center_y - size//2)
+        ]
+        pygame.draw.polygon(DISPLAY_SURF, color, points)
+    elif shape == 'hexagon':
+        points = []
+        for i in range(6):
+            angle = 2 * 3.14159 * i / 6
+            points.append((center_x + size * math.cos(angle), 
+                          center_y + size * math.sin(angle)))
+        pygame.draw.polygon(DISPLAY_SURF, color, points)
+    elif shape == 'oval':
+        pygame.draw.ellipse(DISPLAY_SURF, color, (center_x - size, center_y - size//2, size*2, size))
+
+def draw_card_front(shape_idx, x, y):
+    pygame.draw.rect(DISPLAY_SURF, WHITE, (x, y, CARD_WIDTH, CARD_HEIGHT))
+    pygame.draw.rect(DISPLAY_SURF, BLACK, (x, y, CARD_WIDTH, CARD_HEIGHT), 2)
+    draw_shape(shape_idx, x, y)
+
+def draw_grid():
+    for row in range(GRID_SIZE):
+        for col in range(GRID_SIZE):
+            x = GRID_OFFSET_X + col * (CARD_WIDTH + MARGIN)
+            y = GRID_OFFSET_Y + row * (CARD_HEIGHT + MARGIN)
+            
+            if cards[row][col] == -1:
+                continue  # Skip empty slots
+            
+            if revealed[row][col]:
+                draw_card_front(cards[row][col], x, y)
+            else:
+                draw_card_back(x, y)
+
+def get_card_at_pos(pos):
+    x, y = pos
+    for row in range(GRID_SIZE):
+        for col in range(GRID_SIZE):
+            card_x = GRID_OFFSET_X + col * (CARD_WIDTH + MARGIN)
+            card_y = GRID_OFFSET_Y + row * (CARD_HEIGHT + MARGIN)
+            
+            if (card_x <= x <= card_x + CARD_WIDTH and 
+                card_y <= y <= card_y + CARD_HEIGHT and 
+                cards[row][col] != -1):
+                return (row, col)
+    return None
+
+def show_ad():
+    global ad_visible, ad_timer, LAST_AD_TIME
+    ad_visible = True
+    ad_timer = time.time()
+    LAST_AD_TIME = time.time()
+
+def hide_ad():
+    global ad_visible
+    ad_visible = False
+
+def draw_ad():
+    if not ad_visible:
+        return
+    
+    # Ad background
+    pygame.draw.rect(DISPLAY_SURF, GRAY, (50, 150, WINDOW_WIDTH - 100, WINDOW_HEIGHT - 300))
+    pygame.draw.rect(DISPLAY_SURF, BLACK, (50, 150, WINDOW_WIDTH - 100, WINDOW_HEIGHT - 300), 2)
+    
+    # Ad content
+    ad_text = FONT_MEDIUM.render("Advertisement", True, BLACK)
+    ad_rect = ad_text.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 50))
+    DISPLAY_SURF.blit(ad_text, ad_rect)
+    
+    close_text = FONT_SMALL.render("Close in {:.0f} seconds".format(AD_DURATION - (time.time() - ad_timer)), True, BLACK)
+    close_rect = close_text.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 50))
+    DISPLAY_SURF.blit(close_text, close_rect)
+    
+    # Close button
+    close_btn = pygame.Rect(WINDOW_WIDTH - 120, 160, 60, 30)
+    pygame.draw.rect(DISPLAY_SURF, RED, close_btn)
+    close_text = FONT_SMALL.render("X", True, WHITE)
+    close_text_rect = close_text.get_rect(center=close_btn.center)
+    DISPLAY_SURF.blit(close_text, close_text_rect)
+    
+    return close_btn
+
+def draw_ui():
+    # Title
+    title_text = FONT_LARGE.render("Memory Card Game", True, BLACK)
+    title_rect = title_text.get_rect(center=(WINDOW_WIDTH // 2, 50))
+    DISPLAY_SURF.blit(title_text, title_rect)
+    
+    # Moves counter
+    moves_text = FONT_MEDIUM.render(f"Moves: {moves}", True, BLACK)
+    moves_rect = moves_text.get_rect(topleft=(20, 100))
+    DISPLAY_SURF.blit(moves_text, moves_rect)
+    
+    # Pairs found
+    pairs_text = FONT_MEDIUM.render(f"Pairs: {matched_pairs}/{len(SHAPES)}", True, BLACK)
+    pairs_rect = pairs_text.get_rect(topright=(WINDOW_WIDTH - 20, 100))
+    DISPLAY_SURF.blit(pairs_text, pairs_rect)
+    
+    # Restart button
+    restart_btn = pygame.Rect(WINDOW_WIDTH // 2 - 75, 100, 150, 40)
+    pygame.draw.rect(DISPLAY_SURF, GREEN, restart_btn)
+    restart_text = FONT_SMALL.render("Restart Game", True, WHITE)
+    restart_text_rect = restart_text.get_rect(center=restart_btn.center)
+    DISPLAY_SURF.blit(restart_text, restart_text_rect)
+    
+    return restart_btn
+
+def draw_game_over():
+    overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))  # Semi-transparent black
+    DISPLAY_SURF.blit(overlay, (0, 0))
+    
+    game_over_text = FONT_LARGE.render("Congratulations!", True, WHITE)
+    game_over_rect = game_over_text.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 50))
+    DISPLAY_SURF.blit(game_over_text, game_over_rect)
+    
+    moves_text = FONT_MEDIUM.render(f"You completed the game in {moves} moves!", True, WHITE)
+    moves_rect = moves_text.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 20))
+    DISPLAY_SURF.blit(moves_text, moves_rect)
+    
+    restart_btn = pygame.Rect(WINDOW_WIDTH // 2 - 100, WINDOW_HEIGHT // 2 + 100, 200, 50)
+    pygame.draw.rect(DISPLAY_SURF, GREEN, restart_btn)
+    restart_text = FONT_MEDIUM.render("Play Again", True, WHITE)
+    restart_text_rect = restart_text.get_rect(center=restart_btn.center)
+    DISPLAY_SURF.blit(restart_text, restart_text_rect)
+    
+    return restart_btn
+
+def main():
+    global first_card, second_card, waiting, wait_time, matched_pairs, moves, game_over, LAST_AD_TIME
+    
+    initialize_game()
+    
+    while True:
+        DISPLAY_SURF.fill(WHITE)
+        mouse_pos = pygame.mouse.get_pos()
+        restart_btn = draw_ui()
+        draw_grid()
+        
+        # Check for ads
+        current_time = time.time()
+        if not ad_visible and current_time - LAST_AD_TIME > 30:  # Show ad every 30 seconds
+            show_ad()
+        
+        close_btn = None
+        if ad_visible:
+            close_btn = draw_ad()
+            if current_time - ad_timer > AD_DURATION:
+                hide_ad()
+        
+        if game_over:
+            restart_btn = draw_game_over()
+        
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                sys.exit()
+            
+            if event.type == MOUSEBUTTONDOWN and event.button == 1:
+                if ad_visible and close_btn and close_btn.collidepoint(mouse_pos):
+                    hide_ad()
+                    continue
+                
+                if restart_btn.collidepoint(mouse_pos):
+                    initialize_game()
+                    continue
+                
+                if game_over:
+                    if restart_btn.collidepoint(mouse_pos):
+                        initialize_game()
+                    continue
+                
+                if waiting or ad_visible:
+                    continue
+                
+                card_pos = get_card_at_pos(mouse_pos)
+                if card_pos and not revealed[card_pos[0]][card_pos[1]]:
+                    row, col = card_pos
+                    revealed[row][col] = True
+                    moves += 1
+                    
+                    if first_card is None:
+                        first_card = (row, col)
+                    elif second_card is None:
+                        second_card = (row, col)
+                        # Check for match
+                        if cards[first_card[0]][first_card[1]] == cards[second_card[0]][second_card[1]]:
+                            # Match found
+                            matched_pairs += 1
+                            if matched_pairs == len(SHAPES):
+                                game_over = True
+                            first_card = None
+                            second_card = None
+                        else:
+                            # No match, wait then flip back
+                            waiting = True
+                            wait_time = time.time()
+        
+        # Handle waiting period for card flip back
+        if waiting and time.time() - wait_time > 1.0:  # 1 second delay
+            revealed[first_card[0]][first_card[1]] = False
+            revealed[second_card[0]][second_card[1]] = False
+            first_card = None
+            second_card = None
+            waiting = False
+        
+        pygame.display.update()
+        CLOCK.tick(FPS)
+
+if __name__ == "__main__":
+    import math  # Needed for star and hexagon shapes
+    main()
